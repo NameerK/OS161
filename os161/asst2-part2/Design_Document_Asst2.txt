@@ -1,0 +1,34 @@
+﻿A high-level description of how you are approaching the problem.
+Make a system for PIDs, fork assistance, use the frame stack to hold information for execv, some connection between exit and waitpid for child and parent.
+
+
+
+
+A detailed description of the implementation (e.g., new structures, why they were created, what they are encapsulating, what problems they solve).
+
+
+For the PID system, thread.c maintains a pid array, indicating available pid numbers, and a pid map that grabs the thread with the given pid. Thread structure also has an int for pid and ppid, which are given on creation. Pid’s would be nulled in pidarray when the respective thread was *destroyed* and they would also be nulled in the pid map. This allowed new threads to obtain a pid without having to always enlarge the pid allotment.
+
+
+For exit, the thread would save it’s exit code, turn on a variable notifying that it has exited, and then release it’s exit_lock, waking up any parent thread that was waiting for it. For waitpid, it would determine if there were any faults with the call and then look up the thread in pid map, ensure it was the parent of the child, and try to acquire the child’s lock if it hasn’t already exited. Then it would simply save child’s exit code in status and it’s pid in retval.
+
+
+Forking was mainly adding pid and exit variables to thread_fork and preparing the tf and address space for md_forkentry. Thread_fork had to find and give new threads their pid and maintain the pid array and map, as well as create the child’s lock. Threads will acquire their lock in mi_threadstart. md_forkentry was done as recommended: 
+Copy the parent-trapframe’s content to child trapframe, fix the trapframe to the child’s requirements
+Copy the passed address space to the current process address space and activate it (with as_activate)
+Give the control back to the usermode
+Finally, call mips_usermode() and pass the newly created child trapframe
+
+
+Execv was not fully tested, but the implementation is that it would copy the given arguments into the kernel buffer, open the executable, make a new address space then load the elf, copy back the arguments saved in the kernel buffer into the user stack, and then go back to user mode.
+
+
+
+
+A discussion of the pros and cons of your approach. 
+Pros: Exit and waitpid were simple and interacted with each other well. The PID system was also simple and made retrieval of threads from their pid easy. 
+Cons: Forking while maintaining the pid arrays will take longer due to finding and assigning open pid numbers. There were some unidentifiable problems with execv.
+
+
+Alternatives you considered and why you discarded them.
+The only alternative considered was for the exit and waitpid system. As stated in the document, there may be many improper calls of waitpid on other child threads. This could have been solved by using a semaphore to know how many threads were interested in the thread, but instead we decided it would be better if waitpid usage was more focused and allowed only it’s parent to call waitpid.

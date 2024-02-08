@@ -1,0 +1,14 @@
+1. 0x7f,E,L,F
+2. The difference between UIO_USERSPACE and UIO_USERISPACE is that UIO_USERISPACE is used when the loaded segment is executable and UIO_USERSPACE is for when the loaded segment is not executable. UIO_SYSSPACE is used when a segment is in the kernel
+3. It can be allocated on the stack because it is a virtual address, the memory read actually goes to u.uio_iovec.iov_ubase
+4. vfs_close() decrements the reference count of the ELF file and if we dont do this before going to usermode the file could be open forever and cause a memory leak
+5. md_usermode forces the processor to switch into usermode by calling asm_usermode which updates the status register to usermode and loads all the registers from the trapframe. It is machine dependent.
+6. copyin() is defined in copyinout.c, copyout() is defined in copyinout.c, memmove() is defined in memmove.c in libc. copyin and copyout are more complex than memmove because they move things in both the kernel address space and the user address space to they have to make sure that the information being copied doesn't overlap. memmove doesn't have this problem because it doesn't cross between the user and kernel address space
+7. userptr_t is a pointer that points to one byte and it is used to show which memory address in the user space is going to be changed by copying from the user to kernel or kernel to user 
+8. the value of EX_SYS in kern/arch/mips/include/trapframe.h is set to 8 so the  numerical value of the exception code for a MIPS system call is 8
+9. mips_trap() sets curspl to SPL_HIGH manually instead of using splhigh() because interrupts should already be off. splhigh() sets the spl to high but also turns off interrupts, and to avoid a disaster, it is better to avoid turning off interrupts twice. 
+10. An instruction is 4 bytes in MIPS because the arguments passed to the registers are 32 bit. 
+11. You would "probably want to change" the implementation of kill_curthread() because currently it is not implemented properly. Instead of killing the current process that is being run, it simply turns off the whole system, which is not what kill_curthread() should do
+12. To implement a system call that took more than 4 arguments, you would need to access the additional arguments from the user-level stack
+13. The SYSCALL macro's purpose is to map system calls to a number.
+14. The MIPS instruction that is actually triggers a system call is syscall in the assembly code. This will jump to the instruction that will trigger the syscall

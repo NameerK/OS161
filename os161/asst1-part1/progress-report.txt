@@ -1,0 +1,13 @@
+Member 1: Nameer Khan G01190298
+Member 2: Max Moons G01333662
+
+We worked on trying to implement a basic solution to the traffic management problem. We worked on getting a basic 
+understanding of the lock API's by reading through the code and documentation. We also messed around by implementing 
+different locks and parts of locks to see how they work and interact with each other before removing them. We got a better 
+understanding of the conditions that could create a deadlock and what we should do to avoid them. Decided against using
+one big lock to control access to the critical section and instead use multiple locks to control different parts of the 
+intersection. Looked at implementing print statements to help keep track of what was happening but haven't decided on how
+to do that yet. 
+Responsibilities for Nameer will be to further look at implementing print statements.
+Responsibilities for Max will be to continue to test deadlock conditions and prevention.
+Responisibilties for both of us will be to work on successfully implementing multiple locks to control traffic.

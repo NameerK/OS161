@@ -1,0 +1,2 @@
+1. The intersection is controlled like a Monitor, only one process(car) is allowed in the intersection at a time and this is like the mutex lock of a monitor. In addition the waiting queue to access the shared data(intersection) operates on a first in first out basis.
+2. The one instance where there could be a deadlock is when there is a car on each route A,B, and C and they all want to turn left. Each car then grabs the first lock of their left turn and now they are stuck waiting for eachother to release the lock that they need so they can continue.

@@ -1,0 +1,17 @@
+High-level overview:
+
+Cars will go to their assigned route and wait for the scheduler, trucks will also follow this behaviour but if there are cars waiting then they will wait until there are no cars waiting.
+Vehicles in the route can turn left or right, if they turn right then they will check to see if the lock they need is free and if not they will wait for it to free up. After getting their lock they will quickly be able to make the turn and exit the intersection.
+If they have to turn left then they will check if the first lock is available, if it isn't then they will wait, if it is then they will enter that lock and free up the route that they came from for other vehicles to take. When they are in the first lock of their turn then they will look to see if the second lock is free and will wait in the intersection until it is free, to avoid deadlock there are only 2 left turns allowed at a time and if a third vehicle wants to make a left turn they won't be allowed into the intersection until one of the other left turns are completed.
+
+1. 
+	3 intersection locks to control the 3 parts of the intersection, these are used by cars that are inside that ares of the intersection
+	3 locks representing the routes to the intersection, these are the locks taken by cars trying to enter the intersection
+	3 locks for each of the different car waiting amounts of the three routes, these are used to ensure no race condititions arise for the car waiting variables
+	3 locks to prevent trucks from entering the routes when there are already cars waiting
+	1 lock to control how many vehicles have gone completely through the intersection
+	1 lock to prevent more than two left turns from happening concurrently to avoid a deadlock
+	1 lock to prevent the race conditions on the left turners variable
+
+2. The data structures we used were a counter for the cars waiting in the route and sychronization primitives we used were 1 lock for each route and yielding of trucks waiting for the route so that cars can grab the locks and trucks can properly sleep
+3. when a vehicle is entering the route it checks if there is a vehicle already in the route and trucks can only try to access the route if there are no cars currently waiting for the route. When a vehilce is in the route if it has to turn right it checks if the lock is available and if it iis takes it and completes its turn. If it has to turn left it checks if the first lock it needs is available and if it is grabs it and moves out of the route and into the intersection, it then checks if the second lock it needs is available and if it is then it takes it and completes its turn. If it isn't it will simply wait in the intersection until the lock it needs becomes available

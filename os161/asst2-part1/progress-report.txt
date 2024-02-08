@@ -1,0 +1,8 @@
+Nameer Khan G01190298
+Max Moons G01333662
+
+In this assigment we have to implement 6 different system calls and exception handling, we have looked at many files to get an understanding of what is going on so we can properly implement these things.
+We have started working towards an implementation of getpid and getppid as those looked to be easier than the rest, however properly allocating and reclaiming the pid are things we will have to further work 
+in order to get them working properly. Another thing we have done is started to look at the man pages so we know what the proper error codes to return are. This is important and we will finish reading these 
+soon so that we can properly implement the other 4 functions. The last 4 functions are harder and we haven't really looked at them yet but after figuring out getpid and getppid we will promptly begin working
+on them so that we don't get stuck last minute.

@@ -1,0 +1,13 @@
+1. s8, I looked in the asmdefs.h file and it was written in there
+2. LAMEbus, I looked in bus.h and it was commented there that LAMEbus is supported
+3. splhigh disables all interrupts and spl0 enables all interrupts
+4. machine dependent code has register calls in it that only exist on the machine and not elsewhere the reason to separate these two types of functions is because machine independent code can be reused and machine dependent code can't be used outside of the machine it was written for
+5. an int which represents the current spl level before switching to the new spl level, it was in the spl.c file
+6. MIPS has 6 hardware interrupt lines and we are using them all
+7. 2 interrupt levels, spl0 disables all interrupts and splhigh enables all interrupts creating 2 different levels of interrupts
+8. 32 bit integers, 4,294,967,295 processes could be supported since that is the highest 32 bit unsigned integer value
+9. 8, I think this value is available to user space programs since it is declared next to other call numbers that would be required by user space programs
+10. copyin copies memory from the user-level address to the kernel-level address and copyout copies memory from the kernel-level address to the user-level address. They protect against pcb_badfaultfunc/copyfail logic when memcpy is used.
+11. thread_exit() halts thread actions and prepares the thread to be freed while thread_destroy() frees the stack the thread is taking. A thread can call thread_exit() on itself because it frees the unnecessary parts and turns the thread into a zombie. A thread can not call thread_destory() on itself because it would cause unknown problems freeing the stack it is currently using.
+12. There are four states, RUN, READY, SLEEP, and ZOMB(ie). exorcise() removes all zombies and thread_destroy() free’s the zombies stack. Other than the method comments, exorcise runs through an array containing the zombies and destroys them.
+13. thread_yield(). This function can be used to temporarily halt the thread (unlike thread_sleep() which it needs to be woken up) and put it onto the cpu queue.

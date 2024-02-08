@@ -1,0 +1,1064 @@
+diff --git a/bin/cat/cat b/bin/cat/cat
+index 3d24820..1fb26b9 100755
+Binary files a/bin/cat/cat and b/bin/cat/cat differ
+diff --git a/bin/cp/cp b/bin/cp/cp
+index 3d7190d..545cf1b 100755
+Binary files a/bin/cp/cp and b/bin/cp/cp differ
+diff --git a/bin/false/false b/bin/false/false
+index ee4f8b6..d13be7b 100755
+Binary files a/bin/false/false and b/bin/false/false differ
+diff --git a/bin/ln/ln b/bin/ln/ln
+index 5aef26d..6b79ea8 100755
+Binary files a/bin/ln/ln and b/bin/ln/ln differ
+diff --git a/bin/ls/ls b/bin/ls/ls
+index c91c2f7..675fc0e 100755
+Binary files a/bin/ls/ls and b/bin/ls/ls differ
+diff --git a/bin/ls/ls.o b/bin/ls/ls.o
+index da7afa5..f031507 100644
+Binary files a/bin/ls/ls.o and b/bin/ls/ls.o differ
+diff --git a/bin/mkdir/mkdir b/bin/mkdir/mkdir
+index cafd590..6720828 100755
+Binary files a/bin/mkdir/mkdir and b/bin/mkdir/mkdir differ
+diff --git a/bin/mv/mv b/bin/mv/mv
+index 7c7c9a3..6566213 100755
+Binary files a/bin/mv/mv and b/bin/mv/mv differ
+diff --git a/bin/pwd/pwd b/bin/pwd/pwd
+index b543206..4f9b869 100755
+Binary files a/bin/pwd/pwd and b/bin/pwd/pwd differ
+diff --git a/bin/rm/rm b/bin/rm/rm
+index 26547b2..ca0f0fd 100755
+Binary files a/bin/rm/rm and b/bin/rm/rm differ
+diff --git a/bin/rmdir/rmdir b/bin/rmdir/rmdir
+index bf824ff..b9e4d18 100755
+Binary files a/bin/rmdir/rmdir and b/bin/rmdir/rmdir differ
+diff --git a/bin/sh/sh b/bin/sh/sh
+index d8482fe..38d3c9e 100755
+Binary files a/bin/sh/sh and b/bin/sh/sh differ
+diff --git a/bin/sync/sync b/bin/sync/sync
+index 8f0a0e8..b951e32 100755
+Binary files a/bin/sync/sync and b/bin/sync/sync differ
+diff --git a/bin/true/true b/bin/true/true
+index 833c427..abeb61f 100755
+Binary files a/bin/true/true and b/bin/true/true differ
+diff --git a/include/unistd.h b/include/unistd.h
+index ceb81bb..4ffa6d4 100644
+--- a/include/unistd.h
++++ b/include/unistd.h
+@@ -101,6 +101,7 @@ int rmdir(const char *dirname);
+ 
+ /* Recommended. */
+ int getpid(void);
++int getppid(void);
+ int ioctl(int filehandle, int code, void *buf);
+ int lseek(int filehandle, off_t pos, int code);
+ int fsync(int filehandle);
+diff --git a/kern/arch/mips/include/trapframe.h b/kern/arch/mips/include/trapframe.h
+index bb48591..5c37dd6 100644
+--- a/kern/arch/mips/include/trapframe.h
++++ b/kern/arch/mips/include/trapframe.h
+@@ -72,6 +72,6 @@ struct trapframe {
+  * happen.
+  */
+ void mips_usermode(struct trapframe *tf);
+-void md_forkentry(struct trapframe *tf);
++void md_forkentry(struct trapframe *tf, unsigned long child_address);
+ 
+ #endif /* _MIPS_TRAPFRAME_H_ */
+diff --git a/kern/arch/mips/mips/syscall.c b/kern/arch/mips/mips/syscall.c
+index 60e431d..939bbe8 100644
+--- a/kern/arch/mips/mips/syscall.c
++++ b/kern/arch/mips/mips/syscall.c
+@@ -6,7 +6,11 @@
+ #include <machine/trapframe.h>
+ #include <kern/callno.h>
+ #include <syscall.h>
++#include <thread.h>
++#include <curthread.h>
++#include <addrspace.h>
+ 
++#define SYS_getppid 32
+ 
+ /*
+  * System call handler.
+@@ -50,6 +54,7 @@ mips_syscall(struct trapframe *tf)
+ {
+ 	int callno;
+ 	int32_t retval;
++	int retpid;
+ 	int err;
+ 
+ 	assert(curspl==0);
+@@ -66,6 +71,7 @@ mips_syscall(struct trapframe *tf)
+ 	 */
+ 
+ 	retval = 0;
++	unsigned int i = 0;
+ 
+ 	switch (callno) {
+ 	    case SYS_reboot:
+@@ -73,6 +79,36 @@ mips_syscall(struct trapframe *tf)
+ 		break;
+ 
+ 	    /* Add stuff here */
++		case SYS_write:
++			for (i = 0; i < (size_t) tf->tf_a2; ++i) {
++				kprintf("%c", ((char *) tf->tf_a1)[i]);
++			}
++		break;
++
++		case SYS__exit:
++			err = sys_exit(tf->tf_a0);
++		break;
++
++		case SYS_getpid:
++			err = sys_getpid(&retval);
++		break;
++
++		case SYS_getppid:
++			err = sys_getppid(&retval);
++		break;
++
++		case SYS_fork:
++			err = sys_fork(tf, &retval);
++		break;
++
++		case SYS_execv:
++			err = sys_execv((char *) tf->tf_a0, (char **) tf->tf_a1);
++			
++		break;
++
++		case SYS_waitpid:
++			err = sys_waitpid(tf->tf_a0, &retpid, tf->tf_a2, &retval);
++		break;
+  
+ 	    default:
+ 		kprintf("Unknown syscall %d\n", callno);
+@@ -108,7 +144,7 @@ mips_syscall(struct trapframe *tf)
+ }
+ 
+ void
+-md_forkentry(struct trapframe *tf)
++md_forkentry(struct trapframe *tf, unsigned long child_address)
+ {
+ 	/*
+ 	 * This function is provided as a reminder. You need to write
+@@ -117,5 +153,39 @@ md_forkentry(struct trapframe *tf)
+ 	 * Thus, you can trash it and do things another way if you prefer.
+ 	 */
+ 
+-	(void)tf;
++	/* Child execution starts from md_forkentry(), (if you choose to call it as an
++	 * argument to thread_fork())
++	 * Parent’s trapframe and address space are passed as arguments (type cast when necessary)
++	 * Create new child trapframe (must be on the stack, “kmalloc” wouldn’t work)
++	 * Copy parent-trapframe’s content to child trapframe, and set tf_a3 to 0
++	 * Set the current process ID to the newly generated child ID (since we are
++	 * executing md_forkentry, this is child), if not already set in thread_fork()
++	 * Set the child’s trapframe’s tf_v0 to 0 (child should return 0)
++	 * Increment tf_epc by 4 (otherwise, fork() gets invoked again)
++	 * Copy the passed address space to the current process address space and
++	 * activate it (with as_activate)
++	 * Give the control back to the usermode.
++	 * Call mips_usermode() and pass the newly created child trapframe
++	 */
++
++	struct trapframe tf_stack;
++	struct trapframe *child_tf;
++	struct addrspace *child_as;
++	
++	//Create new child trapframe (must be on the stack, “kmalloc” wouldn’t work)
++	tf_stack = *tf;
++	child_tf = &tf_stack;
++	
++	child_tf->tf_a3 = 0;
++	child_tf->tf_v0 = 0;
++	child_tf->tf_epc += 4;
++	
++	child_as = (struct addrspace *) child_address;
++
++	//Copy the passed address space to the current process address space and activate it (with as_activate)
++	curthread->t_vmspace = child_as;
++	as_activate(curthread->t_vmspace);
++
++	//Call mips_usermode() and pass the newly created child trapframe
++	mips_usermode(&tf_stack);
+ }
+diff --git a/kern/arch/mips/mips/trap.c b/kern/arch/mips/mips/trap.c
+index 30fca6f..95b22bb 100644
+--- a/kern/arch/mips/mips/trap.c
++++ b/kern/arch/mips/mips/trap.c
+@@ -7,6 +7,7 @@
+ #include <vm.h>
+ #include <thread.h>
+ #include <curthread.h>
++#include <syscall.h>
+ 
+ extern u_int32_t curkstack;
+ 
+@@ -56,7 +57,8 @@ kill_curthread(u_int32_t epc, unsigned code, u_int32_t vaddr)
+ void
+ mips_trap(struct trapframe *tf)
+ {
+-	u_int32_t code, isutlb, iskern;
++	u_int32_t code, iskern;
++	//u_int32_t isutlb;
+ 	int savespl;
+ 
+ 	/* The trap frame is supposed to be 37 registers long. */
+@@ -72,7 +74,7 @@ mips_trap(struct trapframe *tf)
+ 	 * Extract the exception code info from the register fields.
+ 	 */
+ 	code = (tf->tf_cause & CCA_CODE) >> CCA_CODESHIFT;
+-	isutlb = (tf->tf_cause & CCA_UTLB);
++	//isutlb = (tf->tf_cause & CCA_UTLB);
+ 	iskern = (tf->tf_status & CST_KUp)==0;
+ 
+ 	assert(code<NTRAPCODES);
+diff --git a/kern/conf/conf.kern b/kern/conf/conf.kern
+index 7d7d9c9..63fb459 100644
+--- a/kern/conf/conf.kern
++++ b/kern/conf/conf.kern
+@@ -382,6 +382,12 @@ file      main/menu.c
+ file      userprog/loadelf.c
+ file      userprog/runprogram.c
+ file      userprog/uio.c
++file      userprog/execv.c
++file      userprog/exit.c
++file      userprog/fork.c
++file      userprog/getpid.c
++file      userprog/getppid.c
++file      userprog/waitpid.c
+ 
+ #
+ # Virtual memory system
+diff --git a/kern/include/kern/callno.h b/kern/include/kern/callno.h
+index 37b8bae..64d1266 100644
+--- a/kern/include/kern/callno.h
++++ b/kern/include/kern/callno.h
+@@ -16,8 +16,8 @@
+ #define SYS_read         5
+ #define SYS_write        6
+ #define SYS_close        7
+-#define SYS_reboot       8
+-#define SYS_sync         9
++#define SYS_reboot       9
++#define SYS_sync         8
+ #define SYS_sbrk         10
+ #define SYS_getpid       11
+ #define SYS_ioctl        12
+@@ -40,6 +40,7 @@
+ #define SYS___getcwd     29
+ #define SYS_stat         30
+ #define SYS_lstat        31
++#define SYS_getppid      32
+ /*CALLEND*/
+ 
+ 
+diff --git a/kern/include/syscall.h b/kern/include/syscall.h
+index 339514d..a5a1b9d 100644
+--- a/kern/include/syscall.h
++++ b/kern/include/syscall.h
+@@ -1,11 +1,18 @@
+ #ifndef _SYSCALL_H_
+ #define _SYSCALL_H_
+ 
++#include <types.h>
+ /*
+  * Prototypes for IN-KERNEL entry points for system call implementations.
+  */
+ 
+ int sys_reboot(int code);
++int sys_getpid(int *retval);
++int sys_getppid(int *retval);
++int sys_waitpid(pid_t pid, int *status, int options, int *retval);
++int sys_execv(const char *program, char **args);
++int sys_fork(struct trapframe *tf, int *retval);
++int sys_exit(int code);
+ 
+ 
+ #endif /* _SYSCALL_H_ */
+diff --git a/kern/include/thread.h b/kern/include/thread.h
+index b051467..d434b56 100644
+--- a/kern/include/thread.h
++++ b/kern/include/thread.h
+@@ -37,8 +37,21 @@ struct thread {
+ 	 * and is manipulated by the virtual filesystem (VFS) code.
+ 	 */
+ 	struct vnode *t_cwd;
++
++	int pid;
++	int ppid;
++	int exited;
++	int exit_code;
++	struct lock *exit_lock;
++	struct lock *wait_lock;
+ };
+ 
++/* Look up a thread by its pid*/
++struct thread *pid_lookup(int pid);
++
++/* Return pidmap size*/
++int pidmap_size();
++
+ /* Call once during startup to allocate data structures. */
+ struct thread *thread_bootstrap(void);
+ 
+diff --git a/kern/lib/copyinout.c b/kern/lib/copyinout.c
+index 6940964..6f0a71a 100644
+--- a/kern/lib/copyinout.c
++++ b/kern/lib/copyinout.c
+@@ -45,7 +45,7 @@
+ #include <vm.h>
+ #include <thread.h>
+ #include <curthread.h>
+-#define DEBUG 0
++//#define DEBUG 0
+ 
+ /*
+  * Recovery function. If a fatal fault occurs during copyin, copyout,
+@@ -113,7 +113,7 @@ copycheck(const_userptr_t userptr, size_t len, size_t *stoplen)
+ int
+ copyin(const_userptr_t usersrc, void *dest, size_t len)
+ {
+-	if(DEBUG==1)
++	if(0==1)
+ 	{
+ 		kprintf("copyin method:\n");
+ 		kprintf("usersrc: %p\n", usersrc);
+@@ -156,7 +156,7 @@ copyin(const_userptr_t usersrc, void *dest, size_t len)
+ int
+ copyout(const void *src, userptr_t userdest, size_t len)
+ {
+-	if(DEBUG==1)
++	if(0==1)
+ 	{
+ 		kprintf("copyout method:\n");
+ 		kprintf("src: %p\n", src);
+diff --git a/kern/thread/thread.c b/kern/thread/thread.c
+index f69f906..76baad2 100644
+--- a/kern/thread/thread.c
++++ b/kern/thread/thread.c
+@@ -13,6 +13,7 @@
+ #include <addrspace.h>
+ #include <vnode.h>
+ #include "opt-synchprobs.h"
++#include <synch.h>
+ 
+ /* States a thread can be in. */
+ typedef enum {
+@@ -34,6 +35,25 @@ static struct array *zombies;
+ /* Total number of outstanding threads. Does not count zombies[]. */
+ static int numthreads;
+ 
++/* Array of integers for pids*/
++static struct array *pidarray;
++
++/* Map of pid to thread*/
++static struct array *pidmap;
++
++/* Look up a thread by its pid*/
++struct thread *pid_lookup(int pid) {
++	if(array_getguy(pidmap, pid-1) != NULL) {
++		return array_getguy(pidmap, pid-1);
++	}
++	return NULL;
++}
++
++/* Return pidmap size*/
++int pidmap_size() {
++	return array_getnum(pidmap);
++}
++
+ /*
+  * Create a thread. This is used both to create the first thread's 
+  * thread structure and to create subsequent threads.
+@@ -61,7 +81,12 @@ thread_create(const char *name)
+ 	
+ 	// If you add things to the thread structure, be sure to initialize
+ 	// them here.
+-	
++	thread->pid = 0;
++	thread->ppid = 0;
++	thread->exited = 0;
++	thread->exit_code = 0;
++	thread->exit_lock = lock_create("exit_lock");
++	thread->wait_lock = lock_create("wait_lock");
+ 	return thread;
+ }
+ 
+@@ -89,6 +114,27 @@ thread_destroy(struct thread *thread)
+ 	}
+ 
+ 	kfree(thread->t_name);
++	/*Set all ppids that match this id to -1*/
++	int i;
++	for(i = 0; i < array_getnum(pidmap); i++) {
++		if(array_getguy(pidmap, i) != NULL) {
++			if(((struct thread *)array_getguy(pidmap, i))->ppid == thread->pid) {
++				((struct thread *)array_getguy(pidmap, i))->ppid = -1;
++			}
++		}
++	}
++
++	array_setguy(pidmap, thread->pid-1, NULL);
++
++	/*Free the pid that thread's pid matches*/
++	if(array_getguy(pidarray, thread->pid-1) != NULL) {
++		kfree(array_getguy(pidarray, thread->pid-1));
++		array_setguy(pidarray, thread->pid-1, NULL);
++	}
++
++	lock_destroy(thread->exit_lock);
++	lock_destroy(thread->wait_lock);
++
+ 	kfree(thread);
+ }
+ 
+@@ -181,6 +227,16 @@ thread_bootstrap(void)
+ 	if (zombies==NULL) {
+ 		panic("Cannot create zombies array\n");
+ 	}
++
++	pidarray = array_create();
++	if (pidarray==NULL) {
++		panic("Cannot create pidarray\n");
++	}
++
++	pidmap = array_create();
++	if (pidmap==NULL) {
++		panic("Cannot create pidmap\n");
++	}
+ 	
+ 	/*
+ 	 * Create the thread structure for the first thread
+@@ -205,6 +261,17 @@ thread_bootstrap(void)
+ 	/* Number of threads starts at 1 */
+ 	numthreads = 1;
+ 
++	/*Allocate a pid*/
++	int *pid = kmalloc(sizeof(int));
++	if (pid==NULL) {
++		panic("thread_bootstrap: Out of memory\n");
++	}
++	*pid = 1;
++	array_add(pidarray, pid);
++
++	/*Allocate a pidmap*/
++	array_add(pidmap, curthread);
++
+ 	/* Done */
+ 	return me;
+ }
+@@ -266,6 +333,47 @@ thread_fork(const char *name,
+ 	/* Set up the pcb (this arranges for func to be called) */
+ 	md_initpcb(&newguy->t_pcb, newguy->t_stack, data1, data2, func);
+ 
++	/*Loops through pidarry to find the first NULL element*/
++	int i;
++	int *pid;
++	int found = 0;
++	for (i=0; i<array_getnum(pidarray); i++) {
++		if (array_getguy(pidarray, i) == NULL) {
++			pid = kmalloc(sizeof(int));
++			if (pid==NULL) {
++				kfree(newguy->t_stack);
++				kfree(newguy->t_name);
++				kfree(newguy);
++				return ENOMEM;
++			}
++			*pid = i+1;
++			array_setguy(pidarray, i, pid);
++			array_setguy(pidmap, i, newguy);
++			newguy->pid = *pid;
++			newguy->ppid = curthread->pid;
++			found = 1;
++			break;
++		}
++	}
++
++	/*If no NULL element is found, add a new element to the end of the array*/
++	if (!found) {
++		pid = kmalloc(sizeof(int));
++		if (pid==NULL) {
++			kfree(newguy->t_stack);
++			kfree(newguy->t_name);
++			kfree(newguy);
++			return ENOMEM;
++		}
++		*pid = array_getnum(pidarray);
++		array_add(pidarray, pid);
++		array_add(pidmap, newguy);
++		newguy->pid = pid[0];
++		newguy->ppid = curthread->pid;
++	}
++
++	lock_acquire(newguy->wait_lock);
++
+ 	/* Interrupts off for atomicity */
+ 	s = splhigh();
+ 
+@@ -288,6 +396,16 @@ thread_fork(const char *name,
+ 		goto fail;
+ 	}
+ 
++	result = array_preallocate(pidarray, numthreads+1);
++	if (result) {
++		goto fail;
++	}
++
++	result = array_preallocate(pidmap, numthreads+1);
++	if (result) {
++		goto fail;
++	}
++
+ 	/* Make the new thread runnable */
+ 	result = make_runnable(newguy);
+ 	if (result != 0) {
+@@ -428,6 +546,8 @@ mi_switch(threadstate_t nextstate)
+ void
+ thread_exit(void)
+ {
++	lock_acquire(curthread->wait_lock);
++	lock_release(curthread->wait_lock);
+ 	if (curthread->t_stack != NULL) {
+ 		/*
+ 		 * Check the magic number we put on the bottom end of
+@@ -575,6 +695,9 @@ mi_threadstart(void *data1, unsigned long data2,
+ 	/* Enable interrupts */
+ 	spl0();
+ 
++	/* Threads will immediately lock their exit lock*/
++	lock_acquire(curthread->exit_lock);
++
+ #if OPT_SYNCHPROBS
+ 	/* Yield a random number of times to get a good mix of threads */
+ 	{
+diff --git a/kern/userprog/execv.c b/kern/userprog/execv.c
+new file mode 100644
+index 0000000..30c9b72
+--- /dev/null
++++ b/kern/userprog/execv.c
+@@ -0,0 +1,115 @@
++#include <types.h>
++#include <kern/errno.h>
++#include <lib.h>
++#include <curthread.h>
++#include <thread.h>
++#include <syscall.h>
++#include <machine/pcb.h>
++#include <machine/spl.h>
++#include <machine/trapframe.h>
++#include <addrspace.h>
++#include <vfs.h>
++
++#define O_RDONLY 0
++
++/* Replace the currently executing program image with a new process image
++ * Process id is unchanged
++ * int sys_execv(char *program, char **args)
++ * program: path name of the program to run
++ * Args: tf->tf_a0 and tf->tf_a1. It’s an array of pointers, each pointer points to a user space
++ * string.
++ * 
++ * execv does more or less the same thing with runprogram. The overall flow of
++ * sys_execv are:
++ *  Copy arguments from user space into kernel buffer
++ *  Open the executable, create a new address space and load the elf into it
++ *  Copy the arguments from kernel buffer into user stack
++ *  Allocate a stack on the new address space using as_define_stack()
++ *  Return to user mode by calling md_usermode
++ */
++int sys_execv(const char *program, char **args) {
++    struct vnode *v;
++    vaddr_t entrypoint, stackptr;
++    int result;
++    int argc = 0;
++    int i = 0;
++    size_t actual;
++    size_t len;
++    char **kbuf;
++    char *kbuf2;
++    int spl;
++
++    spl = splhigh();
++    // Copy arguments from user space into kernel buffer
++    // not complete
++    while (args[argc] != NULL) {
++        argc++;
++    }
++    kbuf = kmalloc(sizeof(char *) * (argc + 1));
++    if (kbuf == NULL) {
++        return ENOMEM;
++    }
++    while (i < argc) {
++        len = strlen(args[i]) + 1;
++        kbuf2 = kmalloc(sizeof(char) * len);
++        if (kbuf2 == NULL) {
++            return ENOMEM;
++        }
++        result = copyinstr((const_userptr_t)args[i], kbuf2, len, &actual);
++        if (result) {
++            return result;
++        }
++        kbuf[i] = kbuf2;
++        i++;
++    }
++    kbuf[argc] = NULL;
++
++    // Open the executable, create a new address space and load the elf into it
++    result = vfs_open((char *)program, O_RDONLY, &v);
++    if (result) {
++        return result;
++    }
++    curthread->t_vmspace = as_create();
++    if (curthread->t_vmspace == NULL) {
++        vfs_close(v);
++        return ENOMEM;
++    }
++    as_activate(curthread->t_vmspace);
++    result = load_elf(v, &entrypoint);
++    if (result) {
++        vfs_close(v);
++        return result;
++    }
++    vfs_close(v);
++
++    // Copy the arguments from kernel buffer into user stack
++    result = as_define_stack(curthread->t_vmspace, &stackptr);
++    if (result) {
++        return result;
++    }
++    stackptr -= sizeof(char *) * (argc + 1);
++    result = copyout(kbuf, (userptr_t)stackptr, sizeof(char *) * (argc + 1));
++    if (result) {
++        return result;
++    }
++    i = 0;
++    while (i < argc) {
++        len = strlen(kbuf[i]) + 1;
++        stackptr -= len;
++        result = copyoutstr(kbuf[i], (userptr_t)stackptr, len, &actual);
++        if (result) {
++            return result;
++        }
++        kfree(kbuf[i]);
++        i++;
++    }
++    kfree(kbuf);
++
++    splx(spl);
++    
++    // Return to user mode by calling md_usermode
++    md_usermode(argc, (userptr_t)stackptr, stackptr, entrypoint);
++
++    panic("md_usermode returned\n");
++    return EINVAL;
++}
+\ No newline at end of file
+diff --git a/kern/userprog/exit.c b/kern/userprog/exit.c
+new file mode 100644
+index 0000000..f9a7831
+--- /dev/null
++++ b/kern/userprog/exit.c
+@@ -0,0 +1,18 @@
++#include <types.h>
++#include <kern/errno.h>
++#include <lib.h>
++#include <curthread.h>
++#include <thread.h>
++#include <syscall.h>
++#include <machine/pcb.h>
++#include <machine/spl.h>
++#include <machine/trapframe.h>
++#include <synch.h>
++
++int sys_exit(int code){
++    curthread->exit_code = code;
++    curthread->exited = 1;
++    lock_release(curthread->exit_lock);
++    thread_exit();
++    return 0;
++}
+diff --git a/kern/userprog/fork.c b/kern/userprog/fork.c
+new file mode 100644
+index 0000000..e8f4fbd
+--- /dev/null
++++ b/kern/userprog/fork.c
+@@ -0,0 +1,51 @@
++#include <types.h>
++#include <kern/errno.h>
++#include <lib.h>
++#include <curthread.h>
++#include <thread.h>
++#include <syscall.h>
++#include <machine/pcb.h>
++#include <machine/spl.h>
++#include <machine/trapframe.h>
++#include <addrspace.h>
++
++int sys_fork(struct trapframe *tf, int *retval) {
++    /*sys_fork prepares a thread_fork that starts at md_forkentry*/
++    struct trapframe *child_tf;
++    struct addrspace *child_as;
++    struct thread *child_thread;
++    int result;
++
++    // Create a new trapframe for the child
++    child_tf = kmalloc(sizeof(struct trapframe));
++    if (child_tf == NULL) {
++        return ENOMEM;
++    }
++
++    // Copy the parent's address space into the child's address space
++    child_as = kmalloc(sizeof(struct addrspace));
++    if (child_as == NULL) {
++        return ENOMEM;
++    }
++    result = as_copy(curthread->t_vmspace, &child_as);
++    if (result) {
++        return result;
++    }
++
++    // Copy the parent's trapframe into the child's trapframe
++    *child_tf = *tf;
++
++    // Call thread_fork to start the child at md_forkentry
++    result = thread_fork("child", child_tf, (unsigned long)child_as, (void (*)(void *, unsigned long))md_forkentry, &child_thread);
++
++    // If thread_fork fails, return the error code
++    if (result) {
++        return result;
++    }
++
++    // Set retval to the child's pid
++    *retval = child_thread->pid;
++
++    // Return
++    return 0;
++}
+\ No newline at end of file
+diff --git a/kern/userprog/getpid.c b/kern/userprog/getpid.c
+new file mode 100644
+index 0000000..a6460b3
+--- /dev/null
++++ b/kern/userprog/getpid.c
+@@ -0,0 +1,14 @@
++#include <types.h>
++#include <kern/errno.h>
++#include <lib.h>
++#include <curthread.h>
++#include <thread.h>
++#include <syscall.h>
++#include <machine/pcb.h>
++#include <machine/spl.h>
++#include <machine/trapframe.h>
++
++int sys_getpid(int *retval) {
++    *retval = curthread->pid;
++    return 0;  
++}
+\ No newline at end of file
+diff --git a/kern/userprog/getppid.c b/kern/userprog/getppid.c
+new file mode 100644
+index 0000000..9e0acf7
+--- /dev/null
++++ b/kern/userprog/getppid.c
+@@ -0,0 +1,19 @@
++#include <types.h>
++#include <kern/errno.h>
++#include <lib.h>
++#include <curthread.h>
++#include <thread.h>
++#include <syscall.h>
++#include <machine/pcb.h>
++#include <machine/spl.h>
++#include <machine/trapframe.h>
++
++int sys_getppid(int *retval) {
++    *retval = curthread->ppid;
++    if (*retval == -1)
++    {
++        return EFAULT;
++    }
++    
++    return 0;
++}
+\ No newline at end of file
+diff --git a/kern/userprog/waitpid.c b/kern/userprog/waitpid.c
+new file mode 100644
+index 0000000..6627172
+--- /dev/null
++++ b/kern/userprog/waitpid.c
+@@ -0,0 +1,46 @@
++#include <types.h>
++#include <kern/errno.h>
++#include <lib.h>
++#include <curthread.h>
++#include <thread.h>
++#include <syscall.h>
++#include <machine/pcb.h>
++#include <machine/spl.h>
++#include <machine/trapframe.h>
++#include <synch.h>
++
++int sys_waitpid(pid_t pid, int *status, int options, int *retval) {
++    if (status == NULL)
++    {
++        return EFAULT;
++    }
++    if (options != 0)
++    {
++        return EINVAL;
++    }
++    struct thread *child = NULL;
++    child = pid_lookup(pid);
++    if (child == NULL)
++    {
++        return EFAULT;
++    }
++    
++    if (child->exited == 0)
++    {
++        lock_acquire(child->exit_lock);
++        *status = child->exit_code;
++        *retval = pid;
++        if (lock_do_i_hold(child->wait_lock))
++            lock_release(child->wait_lock);
++        lock_release(child->exit_lock);
++    }
++    else
++    {
++        *status = child->exit_code;
++        *retval = pid;
++        if (lock_do_i_hold(child->wait_lock))
++            lock_release(child->wait_lock);
++    }
++    
++    return 0;
++}
+\ No newline at end of file
+diff --git a/lib/libc/libc.a b/lib/libc/libc.a
+index f038c04..a329a0e 100644
+Binary files a/lib/libc/libc.a and b/lib/libc/libc.a differ
+diff --git a/lib/libc/syscalls.S b/lib/libc/syscalls.S
+index 5d516f3..cd16097 100644
+--- a/lib/libc/syscalls.S
++++ b/lib/libc/syscalls.S
+@@ -73,8 +73,8 @@ SYSCALL(open, 4)
+ SYSCALL(read, 5)
+ SYSCALL(write, 6)
+ SYSCALL(close, 7)
+-SYSCALL(reboot, 8)
+-SYSCALL(sync, 9)
++SYSCALL(reboot, 9)
++SYSCALL(sync, 8)
+ SYSCALL(sbrk, 10)
+ SYSCALL(getpid, 11)
+ SYSCALL(ioctl, 12)
+@@ -97,3 +97,4 @@ SYSCALL(__time, 28)
+ SYSCALL(__getcwd, 29)
+ SYSCALL(stat, 30)
+ SYSCALL(lstat, 31)
++SYSCALL(getppid, 32)
+diff --git a/lib/libc/syscalls.o b/lib/libc/syscalls.o
+index 0251330..ed8a67f 100644
+Binary files a/lib/libc/syscalls.o and b/lib/libc/syscalls.o differ
+diff --git a/sbin/dumpsfs/dumpsfs b/sbin/dumpsfs/dumpsfs
+index f8d4bc6..59cebf6 100755
+Binary files a/sbin/dumpsfs/dumpsfs and b/sbin/dumpsfs/dumpsfs differ
+diff --git a/sbin/halt/halt b/sbin/halt/halt
+index c2a586d..aa59253 100755
+Binary files a/sbin/halt/halt and b/sbin/halt/halt differ
+diff --git a/sbin/mksfs/mksfs b/sbin/mksfs/mksfs
+index 274511b..7ec5d2b 100755
+Binary files a/sbin/mksfs/mksfs and b/sbin/mksfs/mksfs differ
+diff --git a/sbin/poweroff/poweroff b/sbin/poweroff/poweroff
+index 32b3c4c..c006f7c 100755
+Binary files a/sbin/poweroff/poweroff and b/sbin/poweroff/poweroff differ
+diff --git a/sbin/reboot/reboot b/sbin/reboot/reboot
+index 818f9dc..17d34df 100755
+Binary files a/sbin/reboot/reboot and b/sbin/reboot/reboot differ
+diff --git a/testbin/add/add b/testbin/add/add
+index 04e873d..c98f58c 100755
+Binary files a/testbin/add/add and b/testbin/add/add differ
+diff --git a/testbin/argtest/argtest b/testbin/argtest/argtest
+index fbeaa03..d836efa 100755
+Binary files a/testbin/argtest/argtest and b/testbin/argtest/argtest differ
+diff --git a/testbin/badcall/badcall b/testbin/badcall/badcall
+index e41f3e2..7e8ced4 100755
+Binary files a/testbin/badcall/badcall and b/testbin/badcall/badcall differ
+diff --git a/testbin/badcall/common_buf.o b/testbin/badcall/common_buf.o
+index 9694ca6..4316c9f 100644
+Binary files a/testbin/badcall/common_buf.o and b/testbin/badcall/common_buf.o differ
+diff --git a/testbin/bigfile/bigfile b/testbin/bigfile/bigfile
+index c2c097b..d417831 100755
+Binary files a/testbin/bigfile/bigfile and b/testbin/bigfile/bigfile differ
+diff --git a/testbin/conman/conman b/testbin/conman/conman
+index b1e869f..24aef06 100755
+Binary files a/testbin/conman/conman and b/testbin/conman/conman differ
+diff --git a/testbin/crash/crash b/testbin/crash/crash
+index 2ddd05c..ee3b2ca 100755
+Binary files a/testbin/crash/crash and b/testbin/crash/crash differ
+diff --git a/testbin/ctest/ctest b/testbin/ctest/ctest
+index 68a4ff5..e9fca84 100755
+Binary files a/testbin/ctest/ctest and b/testbin/ctest/ctest differ
+diff --git a/testbin/dirconc/dirconc b/testbin/dirconc/dirconc
+index 111d2fd..ad4ebce 100755
+Binary files a/testbin/dirconc/dirconc and b/testbin/dirconc/dirconc differ
+diff --git a/testbin/dirseek/dirseek b/testbin/dirseek/dirseek
+index 89021db..8e701b4 100755
+Binary files a/testbin/dirseek/dirseek and b/testbin/dirseek/dirseek differ
+diff --git a/testbin/dirtest/dirtest b/testbin/dirtest/dirtest
+index adda97c..51f442e 100755
+Binary files a/testbin/dirtest/dirtest and b/testbin/dirtest/dirtest differ
+diff --git a/testbin/f_test/f_test b/testbin/f_test/f_test
+index a89af1f..717e7e2 100755
+Binary files a/testbin/f_test/f_test and b/testbin/f_test/f_test differ
+diff --git a/testbin/farm/farm b/testbin/farm/farm
+index 305a131..44f141c 100755
+Binary files a/testbin/farm/farm and b/testbin/farm/farm differ
+diff --git a/testbin/faulter/faulter b/testbin/faulter/faulter
+index f6f7083..0c80f68 100755
+Binary files a/testbin/faulter/faulter and b/testbin/faulter/faulter differ
+diff --git a/testbin/filetest/filetest b/testbin/filetest/filetest
+index 15d6d65..cfbfa7a 100755
+Binary files a/testbin/filetest/filetest and b/testbin/filetest/filetest differ
+diff --git a/testbin/filetest/filetest.o b/testbin/filetest/filetest.o
+index 21c8751..02917b8 100644
+Binary files a/testbin/filetest/filetest.o and b/testbin/filetest/filetest.o differ
+diff --git a/testbin/forkbomb/forkbomb b/testbin/forkbomb/forkbomb
+index 4d1d571..875568d 100755
+Binary files a/testbin/forkbomb/forkbomb and b/testbin/forkbomb/forkbomb differ
+diff --git a/testbin/forktest/forktest b/testbin/forktest/forktest
+index cbc4522..747a6bb 100755
+Binary files a/testbin/forktest/forktest and b/testbin/forktest/forktest differ
+diff --git a/testbin/guzzle/guzzle b/testbin/guzzle/guzzle
+index eb60d0a..e1581d7 100755
+Binary files a/testbin/guzzle/guzzle and b/testbin/guzzle/guzzle differ
+diff --git a/testbin/hash/hash b/testbin/hash/hash
+index b365e38..edc47f4 100755
+Binary files a/testbin/hash/hash and b/testbin/hash/hash differ
+diff --git a/testbin/hog/hog b/testbin/hog/hog
+index 1fd19f5..b904a79 100755
+Binary files a/testbin/hog/hog and b/testbin/hog/hog differ
+diff --git a/testbin/huge/huge b/testbin/huge/huge
+index 9c71687..350954f 100755
+Binary files a/testbin/huge/huge and b/testbin/huge/huge differ
+diff --git a/testbin/kern/include/kern/callno.h b/testbin/kern/include/kern/callno.h
+index 37b8bae..64d1266 100644
+--- a/testbin/kern/include/kern/callno.h
++++ b/testbin/kern/include/kern/callno.h
+@@ -16,8 +16,8 @@
+ #define SYS_read         5
+ #define SYS_write        6
+ #define SYS_close        7
+-#define SYS_reboot       8
+-#define SYS_sync         9
++#define SYS_reboot       9
++#define SYS_sync         8
+ #define SYS_sbrk         10
+ #define SYS_getpid       11
+ #define SYS_ioctl        12
+@@ -40,6 +40,7 @@
+ #define SYS___getcwd     29
+ #define SYS_stat         30
+ #define SYS_lstat        31
++#define SYS_getppid      32
+ /*CALLEND*/
+ 
+ 
+diff --git a/testbin/kern/include/synch.h b/testbin/kern/include/synch.h
+index 3583e78..558a76a 100644
+--- a/testbin/kern/include/synch.h
++++ b/testbin/kern/include/synch.h
+@@ -3,6 +3,7 @@
+  */
+ 
+ #ifndef _SYNCH_H_
++#include <thread.h>
+ #define _SYNCH_H_
+ 
+ /*
+@@ -50,6 +51,11 @@ void              sem_destroy(struct semaphore *);
+ 
+ struct lock {
+ 	char *name;
++
++	// create a lock holder variable that indicates which thread is holding the lock
++	// the lock holder variable is initialized to NULL
++	struct thread *lock_holder;
++	
+ 	// add what you need here
+ 	// (don't forget to mark things volatile as needed)
+ };
+diff --git a/testbin/kern/include/thread.h b/testbin/kern/include/thread.h
+index b051467..d434b56 100644
+--- a/testbin/kern/include/thread.h
++++ b/testbin/kern/include/thread.h
+@@ -37,8 +37,21 @@ struct thread {
+ 	 * and is manipulated by the virtual filesystem (VFS) code.
+ 	 */
+ 	struct vnode *t_cwd;
++
++	int pid;
++	int ppid;
++	int exited;
++	int exit_code;
++	struct lock *exit_lock;
++	struct lock *wait_lock;
+ };
+ 
++/* Look up a thread by its pid*/
++struct thread *pid_lookup(int pid);
++
++/* Return pidmap size*/
++int pidmap_size();
++
+ /* Call once during startup to allocate data structures. */
+ struct thread *thread_bootstrap(void);
+ 
+diff --git a/testbin/kitchen/kitchen b/testbin/kitchen/kitchen
+index 51126b2..fbce999 100755
+Binary files a/testbin/kitchen/kitchen and b/testbin/kitchen/kitchen differ
+diff --git a/testbin/matmult/matmult b/testbin/matmult/matmult
+index f176346..9b47c66 100755
+Binary files a/testbin/matmult/matmult and b/testbin/matmult/matmult differ
+diff --git a/testbin/palin/palin b/testbin/palin/palin
+index e672fbc..593b6c9 100755
+Binary files a/testbin/palin/palin and b/testbin/palin/palin differ
+diff --git a/testbin/parallelvm/parallelvm b/testbin/parallelvm/parallelvm
+index e598050..8840025 100755
+Binary files a/testbin/parallelvm/parallelvm and b/testbin/parallelvm/parallelvm differ
+diff --git a/testbin/randcall/randcall b/testbin/randcall/randcall
+index 082d652..b9a2bc0 100755
+Binary files a/testbin/randcall/randcall and b/testbin/randcall/randcall differ
+diff --git a/testbin/rmdirtest/rmdirtest b/testbin/rmdirtest/rmdirtest
+index e18056b..802b75a 100755
+Binary files a/testbin/rmdirtest/rmdirtest and b/testbin/rmdirtest/rmdirtest differ
+diff --git a/testbin/rmtest/rmtest b/testbin/rmtest/rmtest
+index 84b91ef..2b69d00 100755
+Binary files a/testbin/rmtest/rmtest and b/testbin/rmtest/rmtest differ
+diff --git a/testbin/sink/sink b/testbin/sink/sink
+index 814ef35..395813e 100755
+Binary files a/testbin/sink/sink and b/testbin/sink/sink differ
+diff --git a/testbin/sort/sort b/testbin/sort/sort
+index 63a3c66..c08fc54 100755
+Binary files a/testbin/sort/sort and b/testbin/sort/sort differ
+diff --git a/testbin/sty/sty b/testbin/sty/sty
+index bd00fd6..a3e3250 100755
+Binary files a/testbin/sty/sty and b/testbin/sty/sty differ
+diff --git a/testbin/tail/tail b/testbin/tail/tail
+index bd2b020..ce054be 100755
+Binary files a/testbin/tail/tail and b/testbin/tail/tail differ
+diff --git a/testbin/tictac/tictac b/testbin/tictac/tictac
+index a56be9a..ee4a58d 100755
+Binary files a/testbin/tictac/tictac and b/testbin/tictac/tictac differ
+diff --git a/testbin/triplehuge/triplehuge b/testbin/triplehuge/triplehuge
+index 584e18a..680727f 100755
+Binary files a/testbin/triplehuge/triplehuge and b/testbin/triplehuge/triplehuge differ
+diff --git a/testbin/triplemat/triplemat b/testbin/triplemat/triplemat
+index 2542b36..be5b700 100755
+Binary files a/testbin/triplemat/triplemat and b/testbin/triplemat/triplemat differ
+diff --git a/testbin/triplesort/triplesort b/testbin/triplesort/triplesort
+index 2904644..e64ab61 100755
+Binary files a/testbin/triplesort/triplesort and b/testbin/triplesort/triplesort differ
